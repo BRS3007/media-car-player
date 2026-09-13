@@ -249,10 +249,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const pinValue = pin?.trim() || ''
       if (pinValue && !/^\d{4,6}$/.test(pinValue)) return 'El PIN debe tener de 4 a 6 números'
       const user = await createUser(trimmed, pinValue || undefined)
+      await reloadUsers()
       await selectUser(user.id)
       return null
     },
-    [selectUser]
+    [reloadUsers, selectUser]
   )
 
   const removeUser = useCallback(

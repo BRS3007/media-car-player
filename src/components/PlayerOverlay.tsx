@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp } from '@/lib/app-context'
 import { getBlob, updateDuration } from '@/lib/mediaStore'
 import { formatDuration } from '@/lib/format'
+import { unlockAudio } from '@/lib/audio'
+import AudioVisualizer from './AudioVisualizer'
 import { BackIcon, MusicIcon, VideoIcon } from './icons'
 
 interface WakeLockSentinel {
@@ -15,6 +17,7 @@ export default function PlayerOverlay() {
   const current = queue[index]
 
   const mediaRef = useRef<HTMLMediaElement | null>(null)
+  const [mediaEl, setMediaEl] = useState<HTMLMediaElement | null>(null)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null)
   const durationSavedRef = useRef(false)
 
@@ -104,7 +107,10 @@ export default function PlayerOverlay() {
 
   if (!current) return null
 
-  const togglePlay = () => setPlaying((p) => !p)
+  const togglePlay = () => {
+    unlockAudio()
+    setPlaying((p) => !p)
+  }
 
   const seek = (value: number) => {
     const media = mediaRef.current
@@ -113,6 +119,7 @@ export default function PlayerOverlay() {
   }
 
   const onPrev = () => {
+    unlockAudio()
     const media = mediaRef.current
     if (media && media.currentTime > 3) {
       media.currentTime = 0
@@ -153,15 +160,28 @@ export default function PlayerOverlay() {
           />
         ) : (
           <>
-            <div className="flex h-full items-center justify-center">
-              <div className="flex h-72 w-72 items-center justify-center rounded-full bg-gradient-to-br from-sky-900 to-slate-900 ring-8 ring-slate-800">
-                <MusicIcon className="h-36 w-36 text-sky-400" />
+            <div className="relative flex h-full items-center justify-center">
+              <div className="absolute inset-0 flex items-end justify-center px-6 pb-6">
+                <AudioVisualizer media={mediaEl} playing={playing} bars={36} />
+              </div>
+              <div className="flex h-64 w-64 items-center justify-center rounded-full bg-gradient-to-br from-sky-900/95 to-slate-900/95 ring-8 ring-slate-800/80">
+                {playing ? (
+                  <MusicIcon className="h-32 w-32 text-sky-400" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+                    <svg viewBox="0 0 24 24" className="h-16 w-16 text-slate-500" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <span className="text-sm font-semibold text-slate-400">Pausa</span>
+                  </div>
+                )}
               </div>
             </div>
             <audio
               key={current.id}
               ref={(el) => {
                 mediaRef.current = el
+                setMediaEl(el)
               }}
               src={url ?? undefined}
               preload="auto"
@@ -215,7 +235,10 @@ export default function PlayerOverlay() {
           </button>
           <button
             type="button"
-            onClick={next}
+            onClick={() => {
+              unlockAudio()
+              next()
+            }}
             className="flex h-16 w-16 items-center justify-center text-slate-300 active:text-white"
             aria-label="Siguiente"
           >
