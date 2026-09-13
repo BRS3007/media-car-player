@@ -6,6 +6,7 @@ export type Source = 'upload' | 'url'
 
 export interface MediaItem {
   id: string
+  userId: string
   title: string
   type: MediaType
   category: Category
@@ -13,6 +14,13 @@ export interface MediaItem {
   size: number
   duration?: number
   source: Source
+  createdAt: number
+}
+
+export interface User {
+  id: string
+  name: string
+  pinHash?: string
   createdAt: number
 }
 
@@ -26,7 +34,12 @@ interface CarPlayerDB extends DBSchema {
       'by-category': Category
       'by-type': MediaType
       'by-created': number
+      'by-user': string
     }
+  }
+  users: {
+    key: string
+    value: User
   }
   meta: {
     key: string
@@ -35,22 +48,31 @@ interface CarPlayerDB extends DBSchema {
 }
 
 const DB_NAME = 'media-car-player'
-const DB_VERSION = 1
+const DB_VERSION = 2
+
+const CURRENT_USER_KEY = 'current_user'
 
 let dbPromise: Promise<IDBPDatabase<CarPlayerDB>> | null = null
 
 function getDB(): Promise<IDBPDatabase<CarPlayerDB>> {
   if (!dbPromise) {
     dbPromise = openDB<CarPlayerDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, _oldVersion, _newVersion, transaction) {
         if (!db.objectStoreNames.contains('media')) {
           const store = db.createObjectStore('media', { keyPath: 'id' })
           store.createIndex('by-category', 'category')
           store.createIndex('by-type', 'type')
           store.createIndex('by-created', 'createdAt')
         }
+        if (!db.objectStoreNames.contains('users')) {
+          db.createObjectStore('users', { keyPath: 'id' })
+        }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta')
+        }
+        const mediaStore = transaction.objectStore('media')
+        if (!mediaStore.indexNames.contains('by-user')) {
+          mediaStore.createIndex('by-user', 'userId')
         }
       },
     })
@@ -107,6 +129,7 @@ export async function initializeDB(): Promise<void> {
 }
 
 export async function addMedia(item: {
+  userId: string
   title: string
   blob: Blob
   mime?: string
@@ -116,6 +139,7 @@ export async function addMedia(item: {
   const type = detectType(item.title, item.mime || item.blob.type)
   const record: StoredMedia = {
     id: crypto.randomUUID(),
+    userId: item.userId,
     title: item.title,
     type,
     category: categoryFor(type),
@@ -130,9 +154,9 @@ export async function addMedia(item: {
   return publicItem
 }
 
-export async function getAllMedia(): Promise<MediaItem[]> {
+export async function getAllMedia(userId: string): Promise<MediaItem[]> {
   const db = await getDB()
-  const records = await db.getAllFromIndex('media', 'by-created')
+  const records = await db.getAllFromIndex('media', 'by-user', userId)
   records.reverse()
   return records.map(({ blob: _blob, ...item }) => item)
 }
@@ -157,13 +181,76 @@ export async function updateDuration(id: string, duration: number): Promise<void
   await db.put('media', record)
 }
 
-export async function getTotalSize(category?: Category): Promise<number> {
+export async function clearUserMedia(userId: string): Promise<void> {
   const db = await getDB()
-  const items = category ? await db.getAllFromIndex('media', 'by-category', category) : await db.getAll('media')
-  return items.reduce((acc, item) => acc + item.size, 0)
+  const records = await db.getAllFromIndex('media', 'by-user', userId)
+  const tx = db.transaction('media', 'readwrite')
+  await Promise.all(records.map((r) => tx.store.delete(r.id)))
+  await tx.done
 }
 
-export async function clearAll(): Promise<void> {
+// ---- Usuarios ----
+
+export async function getUsers(): Promise<User[]> {
   const db = await getDB()
-  await db.clear('media')
+  const users = await db.getAll('users')
+  users.sort((a, b) => a.createdAt - b.createdAt)
+  return users
+}
+
+export async function createUser(name: string, pin?: string): Promise<User> {
+  const db = await getDB()
+  const user: User = {
+    id: crypto.randomUUID(),
+    name: name.trim() || 'Usuario',
+    ...(pin ? { pinHash: hashPin(pin) } : {}),
+    createdAt: Date.now(),
+  }
+  await db.put('users', user)
+  return user
+}
+
+export async function getUserById(id: string): Promise<User | null> {
+  const db = await getDB()
+  return (await db.get('users', id)) ?? null
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const db = await getDB()
+  await clearUserMedia(id)
+  await db.delete('users', id)
+  const current = await getCurrentUserMeta()
+  if (current === id) await setMetaValue(CURRENT_USER_KEY, null)
+}
+
+export async function getCurrentUserMeta(): Promise<string | null> {
+  const value = await getMetaValue(CURRENT_USER_KEY)
+  return typeof value === 'string' && value ? value : null
+}
+
+export async function setCurrentUserMeta(id: string | null): Promise<void> {
+  await setMetaValue(CURRENT_USER_KEY, id)
+}
+
+export function verifyPin(pin: string, pinHash?: string): boolean {
+  if (!pinHash) return true
+  return hashPin(pin) === pinHash
+}
+
+function hashPin(pin: string): string {
+  let h = 5381
+  for (let i = 0; i < pin.length; i++) {
+    h = ((h << 5) + h) ^ pin.charCodeAt(i)
+  }
+  return (h >>> 0).toString(36)
+}
+
+export async function getMetaValue(key: string): Promise<unknown> {
+  const db = await getDB()
+  return db.get('meta', key)
+}
+
+export async function setMetaValue(key: string, value: unknown): Promise<void> {
+  const db = await getDB()
+  await db.put('meta', value, key)
 }

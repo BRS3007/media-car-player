@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { useApp } from '@/lib/app-context'
 import { DownloadIcon } from './icons'
+import PixabaySection from './PixabaySection'
 
 export default function ImportPanel() {
   const { importFiles, importUrl, wipeAll } = useApp()
@@ -52,7 +53,7 @@ export default function ImportPanel() {
     setMessage(null)
     try {
       await wipeAll()
-      setMessage('Se eliminó todo el contenido.')
+      setMessage('Se eliminó todo el contenido de tu biblioteca.')
     } catch {
       setMessage('No se pudo vaciar la biblioteca.')
     }
@@ -136,6 +137,8 @@ export default function ImportPanel() {
         </div>
       </section>
 
+      <PixabaySection />
+
       {message && (
         <p
           className={`rounded-xl p-4 text-sm font-medium ${
@@ -150,12 +153,13 @@ export default function ImportPanel() {
 
       <section className="rounded-2xl bg-slate-900/80 p-5">
         <h2 className="text-base font-bold text-slate-300">Zona de mantenimiento</h2>
+        <p className="mt-1 text-sm text-slate-400">Solo afecta a tu biblioteca.</p>
         <button
           type="button"
           onClick={handleWipe}
           className="mt-3 min-h-12 rounded-xl border border-red-900/60 bg-red-950/40 px-4 text-sm font-semibold text-red-300 active:bg-red-900/40"
         >
-          Vaciar toda la biblioteca
+          Vaciar mi biblioteca
         </button>
       </section>
     </div>

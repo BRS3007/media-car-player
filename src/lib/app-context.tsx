@@ -11,11 +11,19 @@ import {
 } from 'react'
 import {
   addMedia,
+  clearUserMedia,
+  createUser,
+  deleteUser,
   getAllMedia,
+  getCurrentUserMeta,
+  getUserById,
+  getUsers,
   initializeDB,
   removeMedia,
-  clearAll,
+  setCurrentUserMeta,
+  verifyPin,
   type MediaItem,
+  type User,
 } from './mediaStore'
 import { titleFromUrl } from './format'
 
@@ -24,6 +32,9 @@ export type View = 'music' | 'videos' | 'import'
 interface AppState {
   items: MediaItem[]
   loading: boolean
+  users: User[]
+  currentUser: User | null
+  currentUserId: string | null
   view: View
   queue: MediaItem[]
   index: number
@@ -36,8 +47,16 @@ interface AppState {
   removeItem: (id: string) => Promise<void>
   refreshItems: () => Promise<void>
   importFiles: (files: File[]) => Promise<number>
-  importUrl: (url: string, onProgress?: (received: number, total: number) => void) => Promise<number>
+  importUrl: (
+    url: string,
+    onProgress?: (received: number, total: number) => void,
+    title?: string
+  ) => Promise<number>
   wipeAll: () => Promise<void>
+  selectUser: (userId: string, pin?: string) => Promise<boolean>
+  addUser: (name: string, pin?: string) => Promise<string | null>
+  removeUser: (userId: string) => Promise<void>
+  logoutUser: () => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -45,14 +64,36 @@ const AppContext = createContext<AppState | null>(null)
 export function AppProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [users, setUsers] = useState<User[]>([])
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [view, setViewState] = useState<View>('music')
   const [queue, setQueue] = useState<MediaItem[]>([])
   const [index, setIndex] = useState(0)
   const [playerOpen, setPlayerOpen] = useState(false)
 
+  const currentUser = useMemo(
+    () => users.find((u) => u.id === currentUserId) ?? null,
+    [users, currentUserId]
+  )
+
+  const stopPlayback = useCallback(() => {
+    setQueue([])
+    setIndex(0)
+    setPlayerOpen(false)
+  }, [])
+
   const refreshItems = useCallback(async () => {
-    const all = await getAllMedia()
+    const userId = currentUserId
+    if (!userId) {
+      setItems([])
+      return
+    }
+    const all = await getAllMedia(userId)
     setItems(all)
+  }, [currentUserId])
+
+  const reloadUsers = useCallback(async () => {
+    setUsers(await getUsers())
   }, [])
 
   useEffect(() => {
@@ -63,16 +104,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch {
         // IndexedDB no disponible
       }
-      if (!cancelled) {
-        const all = await getAllMedia()
-        setItems(all)
-        setLoading(false)
+      if (cancelled) return
+      await reloadUsers()
+      const savedUserId = await getCurrentUserMeta()
+      if (savedUserId) {
+        const user = await getUserById(savedUserId)
+        if (user) setCurrentUserId(user.id)
       }
+      setLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadUsers])
+
+  useEffect(() => {
+    if (currentUserId) {
+      getAllMedia(currentUserId)
+        .then(setItems)
+        .catch(() => setItems([]))
+    } else {
+      setItems([])
+    }
+  }, [currentUserId])
 
   const setView = useCallback((v: View) => {
     setViewState(v)
@@ -113,22 +167,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const importFiles = useCallback(
     async (files: File[]): Promise<number> => {
+      if (!currentUserId) throw new Error('Primero elige un usuario')
       let added = 0
       for (const file of files) {
-        await addMedia({ title: file.name, blob: file, mime: file.type, source: 'upload' })
+        await addMedia({ userId: currentUserId, title: file.name, blob: file, mime: file.type, source: 'upload' })
         added += 1
       }
       await refreshItems()
       return added
     },
-    [refreshItems]
+    [currentUserId, refreshItems]
   )
 
   const importUrl = useCallback(
     async (
       url: string,
-      onProgress?: (received: number, total: number) => void
+      onProgress?: (received: number, total: number) => void,
+      customTitle?: string
     ): Promise<number> => {
+      if (!currentUserId) throw new Error('Primero elige un usuario')
       const res = await fetch(`/api/download?url=${encodeURIComponent(url)}`)
       if (!res.ok) {
         const data = await res.json().catch(() => null)
@@ -137,7 +194,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const mime = res.headers.get('content-type') || 'application/octet-stream'
       const disposition = res.headers.get('content-disposition') || ''
       const filename = filenameFromDisposition(disposition)
-      const title = filename || titleFromUrl(url)
+      const title = (customTitle?.trim() || filename || titleFromUrl(url)).trim()
+
+      if (!title) throw new Error('No se pudo determinar el título del archivo')
 
       const reader = res.body?.getReader()
       if (!reader) throw new Error('Sin datos')
@@ -155,24 +214,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const blob = new Blob(chunks as BlobPart[], { type: mime })
-      await addMedia({ title, blob, mime, source: 'url' })
+      await addMedia({ userId: currentUserId, title, blob, mime, source: 'url' })
       await refreshItems()
       return 1
     },
-    [refreshItems]
+    [currentUserId, refreshItems]
   )
 
   const wipeAll = useCallback(async () => {
-    await clearAll()
+    if (!currentUserId) return
+    await clearUserMedia(currentUserId)
     setItems([])
-    setQueue([])
-    setPlayerOpen(false)
-  }, [])
+    stopPlayback()
+  }, [currentUserId, stopPlayback])
+
+  const selectUser = useCallback(
+    async (userId: string, pin?: string): Promise<boolean> => {
+      const user = await getUserById(userId)
+      if (!user) return false
+      if (!verifyPin(pin || '', user.pinHash)) return false
+      await setCurrentUserMeta(user.id)
+      setCurrentUserId(user.id)
+      setViewState('music')
+      stopPlayback()
+      return true
+    },
+    [stopPlayback]
+  )
+
+  const addUser = useCallback(
+    async (name: string, pin?: string): Promise<string | null> => {
+      const trimmed = name.trim()
+      if (!trimmed) return 'Escribe tu nombre'
+      const pinValue = pin?.trim() || ''
+      if (pinValue && !/^\d{4,6}$/.test(pinValue)) return 'El PIN debe tener de 4 a 6 números'
+      const user = await createUser(trimmed, pinValue || undefined)
+      await selectUser(user.id)
+      return null
+    },
+    [selectUser]
+  )
+
+  const removeUser = useCallback(
+    async (userId: string) => {
+      await deleteUser(userId)
+      await reloadUsers()
+      if (currentUserId === userId) {
+        setCurrentUserId(null)
+        stopPlayback()
+      }
+    },
+    [currentUserId, reloadUsers, stopPlayback]
+  )
+
+  const logoutUser = useCallback(async () => {
+    await setCurrentUserMeta(null)
+    setCurrentUserId(null)
+    setViewState('music')
+    stopPlayback()
+  }, [stopPlayback])
 
   const value = useMemo<AppState>(
     () => ({
       items,
       loading,
+      users,
+      currentUser,
+      currentUserId,
       view,
       queue,
       index,
@@ -187,8 +295,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       importFiles,
       importUrl,
       wipeAll,
+      selectUser,
+      addUser,
+      removeUser,
+      logoutUser,
     }),
-    [items, loading, view, queue, index, playerOpen, setView, playAt, closePlayer, next, prev, removeItem, refreshItems, importFiles, importUrl, wipeAll]
+    [
+      items,
+      loading,
+      users,
+      currentUser,
+      currentUserId,
+      view,
+      queue,
+      index,
+      playerOpen,
+      setView,
+      playAt,
+      closePlayer,
+      next,
+      prev,
+      removeItem,
+      refreshItems,
+      importFiles,
+      importUrl,
+      wipeAll,
+      selectUser,
+      addUser,
+      removeUser,
+      logoutUser,
+    ]
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
