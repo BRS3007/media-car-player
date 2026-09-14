@@ -11,7 +11,6 @@ export async function GET() {
     const params: Record<string, string> = {
       timestamp,
       folder: CLOUD_FOLDER,
-      resource_type: 'video',
     }
     const signature = signParams(params)
     return NextResponse.json({
@@ -20,7 +19,6 @@ export async function GET() {
       timestamp,
       signature,
       folder: params.folder,
-      resource_type: params.resource_type,
     })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Error de servidor' }, { status: 500 })

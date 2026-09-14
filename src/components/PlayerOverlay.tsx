@@ -6,7 +6,7 @@ import { getBlob, updateDuration } from '@/lib/mediaStore'
 import { formatDuration } from '@/lib/format'
 import { unlockAudio } from '@/lib/audio'
 import AudioVisualizer from './AudioVisualizer'
-import { BackIcon, MusicIcon, VideoIcon } from './icons'
+import { BackIcon, VideoIcon } from './icons'
 import CarSlideshow from './CarSlideshow'
 
 interface WakeLockSentinel {
@@ -26,7 +26,7 @@ export default function PlayerOverlay() {
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [carouselMs, setCarouselMs] = useState(30000)
+  const carouselMs = 30000
 
   useEffect(() => {
     if (!current) {
@@ -164,19 +164,14 @@ export default function PlayerOverlay() {
           <>
             <div className="relative flex h-full items-center justify-center">
               <CarSlideshow interval={carouselMs} />
-              <div className="absolute inset-0"></div>
-              <div className="relative flex h-60 w-60 items-center justify-center rounded-full bg-slate-950/55 ring-8 ring-slate-800/60 backdrop-blur-[2px]">
-                {playing ? (
-                  <MusicIcon className="h-28 w-28 text-sky-300 drop-shadow-lg" />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
-                    <svg viewBox="0 0 24 24" className="h-14 w-14 text-slate-400" fill="currentColor">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    <span className="text-sm font-semibold text-slate-300">Pausa</span>
-                  </div>
-                )}
-              </div>
+              {!playing && (
+                <div className="relative flex items-center gap-2 rounded-full bg-slate-950/70 px-5 py-3">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-300" fill="currentColor">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <span className="text-sm font-semibold text-slate-200">Pausa</span>
+                </div>
+              )}
             </div>
             <div className="absolute bottom-0 inset-x-0 flex h-16 items-end justify-center px-8 pb-2">
               <AudioVisualizer media={mediaEl} playing={playing} bars={28} />
@@ -209,30 +204,6 @@ export default function PlayerOverlay() {
           className="w-full"
           aria-label="Progreso"
         />
-
-        {!isVideo && (
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <span className="text-xs text-slate-500">Fotos cada</span>
-            <button
-              type="button"
-              onClick={() => setCarouselMs(30000)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                carouselMs === 30000 ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              30 s
-            </button>
-            <button
-              type="button"
-              onClick={() => setCarouselMs(60000)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                carouselMs === 60000 ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              1 min
-            </button>
-          </div>
-        )}
 
         <div className="mt-4 flex items-center justify-center gap-8">
           <button

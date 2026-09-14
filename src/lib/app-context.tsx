@@ -69,8 +69,9 @@ interface AppState {
   cloudError: string | null
   lastSync: number | null
   activateCloud: (pin: string) => Promise<string | null>
-  syncNow: () => Promise<string | null>
+  syncNow: (userIdArg?: string) => Promise<string | null>
   deactivateCloud: () => Promise<void>
+  connectCloud: (name: string, pin: string) => Promise<string | null>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -352,8 +353,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await setTokenAndState(currentUserId, null)
   }, [currentUserId, setTokenAndState])
 
-  const syncNow = useCallback(async (): Promise<string | null> => {
-    const userId = currentUserId
+  const syncNow = useCallback(async (userIdArg?: string): Promise<string | null> => {
+    const userId = userIdArg ?? currentUserId
     if (!userId) return 'Primero elige un usuario'
     const token = await getCloudToken(userId)
     if (!token) return 'Primero activa la sincronización en la nube'
@@ -376,7 +377,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         form.append('timestamp', String(signed.timestamp))
         form.append('signature', signed.signature)
         form.append('folder', signed.folder)
-        form.append('resource_type', signed.resource_type)
         const up = await fetch(`https://api.cloudinary.com/v1_1/${signed.cloudName}/video/upload`, {
           method: 'POST',
           body: form,
@@ -465,6 +465,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [currentUserId, syncing, refreshItems])
 
+  const connectCloud = useCallback(
+    async (name: string, pin: string): Promise<string | null> => {
+      const trimmed = name.trim()
+      const pinValue = pin.trim()
+      if (!trimmed || !/^\d{4,6}$/.test(pinValue)) {
+        return 'Escribe tu nombre y un PIN de 4 a 6 dígitos'
+      }
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, pin: pinValue }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        if (res.status === 401) {
+          return 'No encontré ese usuario en la nube. Créalo en el PC con ese nombre y PIN, activa la nube y sincroniza.'
+        }
+        return (data as { error?: string } | null)?.error || 'Error al conectar con la nube'
+      }
+      const data = await res.json()
+      const existing = users.find((u) => u.name.toLowerCase() === trimmed.toLowerCase())
+      let localId: string
+      if (existing) {
+        localId = existing.id
+      } else {
+        const user = await createUser(trimmed, pinValue)
+        await reloadUsers()
+        localId = user.id
+      }
+      await setTokenAndState(localId, data.token)
+      await selectUser(localId)
+      return syncNow(localId)
+    },
+    [users, reloadUsers, selectUser, syncNow, setTokenAndState]
+  )
+
   const value = useMemo<AppState>(
     () => ({
       items,
@@ -497,6 +533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activateCloud,
       syncNow,
       deactivateCloud,
+      connectCloud,
     }),
     [
       items,
@@ -529,6 +566,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       activateCloud,
       syncNow,
       deactivateCloud,
+      connectCloud,
     ]
   )
 

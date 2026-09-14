@@ -2,16 +2,21 @@
 
 import { useState } from 'react'
 import { useApp } from '@/lib/app-context'
-import { MusicIcon, TrashIcon } from './icons'
+import { CarLogo, TrashIcon } from './icons'
 
 export default function UserScreen() {
-  const { users, loading, selectUser, addUser, removeUser } = useApp()
+  const { users, loading, selectUser, addUser, removeUser, connectCloud } = useApp()
 
   const [name, setName] = useState('')
   const [pin, setPin] = useState('')
   const [pinConfirm, setPinConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const [cloudName, setCloudName] = useState('')
+  const [cloudPin, setCloudPin] = useState('')
+  const [cloudError, setCloudError] = useState<string | null>(null)
+  const [cloudBusy, setCloudBusy] = useState(false)
 
   const [pinUserId, setPinUserId] = useState<string | null>(null)
   const [pinValue, setPinValue] = useState('')
@@ -29,6 +34,20 @@ export default function UserScreen() {
       if (err) setError(err)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleConnect() {
+    setCloudBusy(true)
+    setCloudError(null)
+    try {
+      const err = await connectCloud(cloudName, cloudPin)
+      if (err) {
+        setCloudError(err)
+        return
+      }
+    } finally {
+      setCloudBusy(false)
     }
   }
 
@@ -97,7 +116,7 @@ export default function UserScreen() {
     <div className="mx-auto flex h-full min-h-dvh max-w-3xl flex-col overflow-y-auto px-6 py-10 no-scrollbar">
       <div className="mb-8 text-center">
         <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-sky-600 text-white">
-          <MusicIcon className="h-10 w-10" />
+          <CarLogo className="h-14 w-14" />
         </div>
         <h1 className="text-3xl font-bold">Media Car</h1>
         <p className="mt-2 text-slate-400">¿Quién va a usar el carro hoy?</p>
@@ -175,6 +194,40 @@ export default function UserScreen() {
                 className="min-h-14 rounded-xl bg-sky-600 font-bold text-white active:bg-sky-500 disabled:opacity-40"
               >
                 {busy ? 'Creando…' : 'Crear usuario y entrar'}
+              </button>
+            </div>
+          </section>
+
+          <section className="mt-4 rounded-2xl border border-sky-800/60 bg-slate-900/80 p-5">
+            <h2 className="text-lg font-bold text-sky-300">Ya tengo cuenta en la nube</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Conecta este dispositivo a un usuario que ya sincronizaste en otro (PC, tablet, móvil): se descarga su biblioteca.
+            </p>
+            <div className="mt-4 flex flex-col gap-3">
+              <input
+                type="text"
+                value={cloudName}
+                onChange={(e) => setCloudName(e.target.value)}
+                placeholder="Tu nombre (igual que en el PC)"
+                autoCapitalize="words"
+                className="min-h-14 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 text-base text-slate-100 placeholder:text-slate-500"
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                value={cloudPin}
+                onChange={(e) => setCloudPin(e.target.value.replace(/\D/g, ''))}
+                placeholder="PIN (igual que en el PC)"
+                className="min-h-14 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 text-center tracking-widest text-slate-100 placeholder:text-base placeholder:text-slate-500 placeholder:tracking-normal"
+              />
+              {cloudError && <p className="text-sm text-rose-400">{cloudError}</p>}
+              <button
+                type="button"
+                onClick={handleConnect}
+                disabled={cloudBusy || !cloudName.trim() || cloudPin.length < 4}
+                className="min-h-14 rounded-xl border border-sky-700 bg-sky-900/60 font-bold text-sky-200 active:bg-sky-800 disabled:opacity-40"
+              >
+                {cloudBusy ? 'Conectando y sincronizando…' : 'Conectar y sincronizar'}
               </button>
             </div>
           </section>

@@ -59,8 +59,20 @@ function inTriangle(px, py, ax, ay, bx, by, cx, cy) {
   return !(neg && pos)
 }
 
+function circlePoints(cx, cy, r, x, y) {
+  return Math.hypot(x - cx, y - cy) <= r
+}
+
+function roundedRect(x1, y1, x2, y2, r, x, y) {
+  if (x < x1 || x > x2 || y < y1 || y > y2) return false
+  const qx = Math.max(x1 + r, Math.min(x2 - r, x))
+  const qy = Math.max(y1 + r, Math.min(y2 - r, y))
+  return Math.hypot(x - qx, y - qy) <= r
+}
+
 function makeIcon(size) {
   const radius = size * 0.22
+  const s = size
   const px = (x, y) => {
     // rounded rect background
     const cx = Math.max(radius, Math.min(size - radius, x))
@@ -70,31 +82,26 @@ function makeIcon(size) {
     const r = Math.hypot(dx, dy)
     if (r > radius) return [15, 23, 42, 0]
 
-    const v = (y / size) * 0.5 + 0.5
-    const rA = Math.round(13 + 18 * (1 - v))
-    const gA = Math.round(20 + 28 * (1 - v))
-    const bA = Math.round(36 + 45 * (1 - v))
-
-    const dxn = (x - size * 0.5) / size
-    const dyn = (y - size * 0.5) / size
-    const dist = Math.sqrt(dxn * dxn + dyn * dyn)
-
+    // fondo: degradado cielo
+    const v = y / s
+    const rA = Math.round(56 + (30 - 56) * v)
+    const gA = Math.round(189 + (58 - 189) * v)
+    const bA = Math.round(248 + (129 - 248) * v)
     let color = [rA, gA, bA]
 
-    // subtle ring
-    if (dist < 0.42 && dist > 0.36) {
-      const t = (0.42 - dist) / 0.06
-      color = [
-        Math.round(color[0] + (56 - color[0]) * t),
-        Math.round(color[1] + (189 - color[1]) * t),
-        Math.round(color[2] + (248 - color[2]) * t),
-      ]
-    }
+    // carro blanco
+    const body = roundedRect(s * 0.15, s * 0.44, s * 0.85, s * 0.66, s * 0.05, x, y)
+    const cabin = roundedRect(s * 0.41, s * 0.28, s * 0.63, s * 0.46, s * 0.04, x, y)
+    const window_ = roundedRect(s * 0.44, s * 0.315, s * 0.6, s * 0.42, s * 0.03, x, y)
+    const wheelL = circlePoints(s * 0.33, s * 0.7, s * 0.09, x, y)
+    const wheelR = circlePoints(s * 0.67, s * 0.7, s * 0.09, x, y)
+    const hubL = circlePoints(s * 0.33, s * 0.7, s * 0.035, x, y)
+    const hubR = circlePoints(s * 0.67, s * 0.7, s * 0.035, x, y)
 
-    // play triangle
-    if (inTriangle(x, y, size * 0.38, size * 0.32, size * 0.38, size * 0.68, size * 0.72, size * 0.5)) {
-      color = [56, 189, 248]
-    }
+    if (body || cabin) color = [248, 250, 252]
+    if (window_) color = [125, 211, 252]
+    if (wheelL || wheelR) color = [15, 23, 42]
+    if (hubL || hubR) color = [125, 211, 252]
 
     return [...color, 255]
   }

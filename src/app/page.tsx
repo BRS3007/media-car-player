@@ -10,7 +10,7 @@ import PlayerOverlay from '@/components/PlayerOverlay'
 import HelpModal from '@/components/HelpModal'
 import SyncPanel from '@/components/SyncPanel'
 import UserScreen from '@/components/UserScreen'
-import { DownloadIcon, HelpIcon, MusicIcon, VideoIcon } from '@/components/icons'
+import { CarLogo, DownloadIcon, HelpIcon, MusicIcon, VideoIcon } from '@/components/icons'
 
 function Shell() {
   const { view, setView, items, loading, playAt, removeItem, currentUser, logoutUser } = useApp()
@@ -31,7 +31,10 @@ function Shell() {
     <div className="mx-auto flex h-full min-h-dvh max-w-3xl flex-col">
       <header className="pt-safe shrink-0 px-5 pb-4 pt-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Media Car</h1>
+          <div className="flex items-center gap-3">
+            <CarLogo className="h-10 w-10" />
+            <h1 className="text-2xl font-bold">Media Car</h1>
+          </div>
           <div className="flex items-center gap-2">
             <SyncPanel />
             <button
