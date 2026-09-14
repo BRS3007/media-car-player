@@ -2,7 +2,14 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 
 export type MediaType = 'audio' | 'video'
 export type Category = 'music' | 'videos'
-export type Source = 'upload' | 'url'
+export type Source = 'upload' | 'url' | 'sync'
+
+export interface CloudMeta {
+  publicId: string
+  url: string
+  sizeBytes: number
+  syncedAt: number
+}
 
 export interface MediaItem {
   id: string
@@ -15,6 +22,8 @@ export interface MediaItem {
   duration?: number
   source: Source
   createdAt: number
+  updatedAt: number
+  cloud?: CloudMeta
 }
 
 export interface User {
@@ -51,6 +60,8 @@ const DB_NAME = 'media-car-player'
 const DB_VERSION = 2
 
 const CURRENT_USER_KEY = 'current_user'
+const TOMBSTONE_PREFIX = 'tomb_'
+export const CLOUD_TOKEN_PREFIX = 'cloud_token_'
 
 let dbPromise: Promise<IDBPDatabase<CarPlayerDB>> | null = null
 
@@ -128,17 +139,27 @@ export async function initializeDB(): Promise<void> {
   await getDB()
 }
 
-export async function addMedia(item: {
-  userId: string
-  title: string
-  blob: Blob
-  mime?: string
-  source: Source
-}): Promise<MediaItem> {
+export async function addMedia(
+  item: {
+    userId: string
+    title: string
+    blob: Blob
+    mime?: string
+    source: Source
+  },
+  opts?: {
+    id?: string
+    type?: MediaType
+    updatedAt?: number
+    cloud?: CloudMeta
+  }
+): Promise<MediaItem> {
   const db = await getDB()
-  const type = detectType(item.title, item.mime || item.blob.type)
+  const now = Date.now()
+  const type = opts?.type ?? detectType(item.title, item.mime || item.blob.type)
+  const createTime = opts?.updatedAt ?? now
   const record: StoredMedia = {
-    id: crypto.randomUUID(),
+    id: opts?.id ?? crypto.randomUUID(),
     userId: item.userId,
     title: item.title,
     type,
@@ -146,7 +167,9 @@ export async function addMedia(item: {
     mime: item.mime || item.blob.type || 'application/octet-stream',
     size: item.blob.size,
     source: item.source,
-    createdAt: Date.now(),
+    createdAt: createTime,
+    updatedAt: createTime,
+    ...(opts?.cloud ? { cloud: opts.cloud } : {}),
     blob: item.blob,
   }
   await db.put('media', record)
@@ -171,6 +194,15 @@ export async function getBlob(id: string): Promise<Blob> {
 export async function removeMedia(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('media', id)
+  await setTombstone(id)
+}
+
+export async function setMediaCloudMeta(id: string, cloud: CloudMeta): Promise<void> {
+  const db = await getDB()
+  const record = await db.get('media', id)
+  if (!record) return
+  record.cloud = cloud
+  await db.put('media', record)
 }
 
 export async function updateDuration(id: string, duration: number): Promise<void> {
@@ -178,7 +210,35 @@ export async function updateDuration(id: string, duration: number): Promise<void
   const record = await db.get('media', id)
   if (!record) return
   record.duration = duration
+  record.updatedAt = Date.now()
   await db.put('media', record)
+}
+
+// ---- Sincronización (tombstones para borrados) ----
+
+export async function setTombstone(mediaId: string): Promise<void> {
+  await setMetaValue(`${TOMBSTONE_PREFIX}${mediaId}`, Date.now())
+}
+
+export async function getTombstones(): Promise<string[]> {
+  const db = await getDB()
+  const keys = await db.getAllKeys('meta')
+  return keys
+    .filter((k) => typeof k === 'string' && k.startsWith(TOMBSTONE_PREFIX))
+    .map((k) => String(k).slice(TOMBSTONE_PREFIX.length))
+}
+
+export async function clearTombstone(mediaId: string): Promise<void> {
+  await setMetaValue(`${TOMBSTONE_PREFIX}${mediaId}`, null)
+}
+
+export async function getCloudToken(userId: string): Promise<string | null> {
+  const value = await getMetaValue(`${CLOUD_TOKEN_PREFIX}${userId}`)
+  return typeof value === 'string' && value ? value : null
+}
+
+export async function setCloudToken(userId: string, token: string | null): Promise<void> {
+  await setMetaValue(`${CLOUD_TOKEN_PREFIX}${userId}`, token)
 }
 
 export async function clearUserMedia(userId: string): Promise<void> {

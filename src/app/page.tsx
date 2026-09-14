@@ -8,6 +8,7 @@ import ImportPanel from '@/components/ImportPanel'
 import PlayerBar from '@/components/PlayerBar'
 import PlayerOverlay from '@/components/PlayerOverlay'
 import HelpModal from '@/components/HelpModal'
+import SyncPanel from '@/components/SyncPanel'
 import UserScreen from '@/components/UserScreen'
 import { DownloadIcon, HelpIcon, MusicIcon, VideoIcon } from '@/components/icons'
 
@@ -32,6 +33,7 @@ function Shell() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Media Car</h1>
           <div className="flex items-center gap-2">
+            <SyncPanel />
             <button
               type="button"
               onClick={() => setHelpOpen(true)}

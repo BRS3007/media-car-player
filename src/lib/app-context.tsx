@@ -12,16 +12,23 @@ import {
 import {
   addMedia,
   clearUserMedia,
+  clearTombstone,
   createUser,
   deleteUser,
   getAllMedia,
+  getBlob,
+  getCloudToken,
   getCurrentUserMeta,
+  getTombstones,
   getUserById,
   getUsers,
   initializeDB,
   removeMedia,
+  setCloudToken,
   setCurrentUserMeta,
+  setMediaCloudMeta,
   verifyPin,
+  type CloudMeta,
   type MediaItem,
   type User,
 } from './mediaStore'
@@ -57,6 +64,13 @@ interface AppState {
   addUser: (name: string, pin?: string) => Promise<string | null>
   removeUser: (userId: string) => Promise<void>
   logoutUser: () => Promise<void>
+  cloudActive: boolean
+  syncing: boolean
+  cloudError: string | null
+  lastSync: number | null
+  activateCloud: (pin: string) => Promise<string | null>
+  syncNow: () => Promise<string | null>
+  deactivateCloud: () => Promise<void>
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -70,6 +84,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<MediaItem[]>([])
   const [index, setIndex] = useState(0)
   const [playerOpen, setPlayerOpen] = useState(false)
+  const [cloudActive, setCloudActive] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [cloudError, setCloudError] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState<number | null>(null)
 
   const currentUser = useMemo(
     () => users.find((u) => u.id === currentUserId) ?? null,
@@ -126,6 +144,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       setItems([])
     }
+  }, [currentUserId])
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setCloudActive(false)
+      return
+    }
+    getCloudToken(currentUserId)
+      .then((t) => setCloudActive(!!t))
+      .catch(() => setCloudActive(false))
   }, [currentUserId])
 
   const setView = useCallback((v: View) => {
@@ -275,6 +303,168 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stopPlayback()
   }, [stopPlayback])
 
+  // ---- Nube ----
+
+  const setTokenAndState = useCallback(async (userId: string, token: string | null) => {
+    await setCloudToken(userId, token)
+    setCloudActive(!!token)
+  }, [])
+
+  const activateCloud = useCallback(
+    async (pin: string): Promise<string | null> => {
+      const user = currentUser
+      if (!user) return 'Primero elige un usuario'
+      const name = user.name.trim()
+      const pinValue = pin.trim()
+      if (!name || !/^\d{4,6}$/.test(pinValue)) return 'El PIN debe tener de 4 a 6 dígitos'
+      if (cloudActive) return null
+
+      const send = (path: string) =>
+        fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, pin: pinValue }),
+        })
+      let res = await send('/api/auth/register')
+      if (res.status === 409) res = await send('/api/auth/login')
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        return data?.error || (res.status === 401 ? 'Nombre o PIN incorrecto' : 'Error al conectar con la nube')
+      }
+      const data = await res.json()
+      await setTokenAndState(user.id, data.token)
+      setCloudError(null)
+      return null
+    },
+    [currentUser, cloudActive, setTokenAndState]
+  )
+
+  const deactivateCloud = useCallback(async () => {
+    if (!currentUserId) return
+    const token = await getCloudToken(currentUserId)
+    if (token) {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      }).catch(() => {})
+    }
+    await setTokenAndState(currentUserId, null)
+  }, [currentUserId, setTokenAndState])
+
+  const syncNow = useCallback(async (): Promise<string | null> => {
+    const userId = currentUserId
+    if (!userId) return 'Primero elige un usuario'
+    const token = await getCloudToken(userId)
+    if (!token) return 'Primero activa la sincronización en la nube'
+    if (syncing) return null
+
+    setSyncing(true)
+    setCloudError(null)
+    try {
+      const signed = await fetch('/api/cloudinary/sign').then((r) => r.json())
+      if (!signed.signature) return signed.error || 'No se pudo preparar la subida'
+
+      const local = await getAllMedia(userId)
+      let uploaded = 0
+      for (const item of local) {
+        if (item.cloud && item.cloud.syncedAt >= item.updatedAt) continue
+        const blob = await getBlob(item.id)
+        const form = new FormData()
+        form.append('file', blob, item.title || 'archivo')
+        form.append('api_key', String(signed.apiKey))
+        form.append('timestamp', String(signed.timestamp))
+        form.append('signature', signed.signature)
+        form.append('folder', signed.folder)
+        form.append('resource_type', signed.resource_type)
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${signed.cloudName}/video/upload`, {
+          method: 'POST',
+          body: form,
+        })
+        if (!up.ok) continue
+        const data = await up.json()
+        if (!data.public_id || !data.secure_url) continue
+        const meta: CloudMeta = {
+          publicId: data.public_id,
+          url: data.secure_url,
+          sizeBytes: data.bytes ?? item.size,
+          syncedAt: Date.now(),
+        }
+        await setMediaCloudMeta(item.id, meta)
+        uploaded++
+      }
+
+      const fresh = await getAllMedia(userId)
+      const withCloud = fresh.filter((it) => it.cloud)
+      if (withCloud.length) {
+        const pushRes = await fetch('/api/sync/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+          body: JSON.stringify({
+            items: withCloud.map((it) => ({
+              mediaId: it.id,
+              title: it.title,
+              type: it.type,
+              duration: it.duration ?? null,
+              cloudinaryPublicId: it.cloud!.publicId,
+              cloudinaryUrl: it.cloud!.url,
+              sizeBytes: it.cloud!.sizeBytes,
+              updatedAt: it.updatedAt,
+            })),
+          }),
+        })
+        if (!pushRes.ok) {
+          return (await pushRes.json().catch(() => null))?.error || 'Error al guardar en la nube'
+        }
+      }
+
+      const tombstones = await getTombstones()
+      for (const mediaId of tombstones) {
+        await fetch('/api/sync/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+          body: JSON.stringify({ mediaId }),
+        }).catch(() => {})
+        await clearTombstone(mediaId)
+      }
+
+      const pullRes = await fetch('/api/sync/pull', { headers: { 'x-session-token': token } })
+      if (!pullRes.ok) return 'Error al traer la biblioteca de la nube'
+      const data = await pullRes.json()
+      const items: CloudItem[] = Array.isArray(data.items) ? data.items : []
+      let pulled = 0
+      for (const c of items) {
+        const exists = fresh.find((it) => it.id === c.mediaId)
+        if (exists && exists.updatedAt >= c.updatedAt) continue
+        const blob = await fetchCloudBlob(c.cloudinaryUrl)
+        if (!blob) continue
+        await addMedia(
+          { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
+          {
+            id: c.mediaId,
+            type: c.type,
+            updatedAt: c.updatedAt,
+            cloud: {
+              publicId: c.publicId,
+              url: c.cloudinaryUrl,
+              sizeBytes: c.sizeBytes ?? blob.size,
+              syncedAt: c.updatedAt,
+            },
+          }
+        )
+        pulled++
+      }
+
+      await refreshItems()
+      setLastSync(Date.now())
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Error de sincronización'
+    } finally {
+      setSyncing(false)
+    }
+  }, [currentUserId, syncing, refreshItems])
+
   const value = useMemo<AppState>(
     () => ({
       items,
@@ -300,6 +490,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addUser,
       removeUser,
       logoutUser,
+      cloudActive,
+      syncing,
+      cloudError,
+      lastSync,
+      activateCloud,
+      syncNow,
+      deactivateCloud,
     }),
     [
       items,
@@ -311,6 +508,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       queue,
       index,
       playerOpen,
+      cloudActive,
+      syncing,
+      cloudError,
+      lastSync,
       setView,
       playAt,
       closePlayer,
@@ -325,6 +526,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addUser,
       removeUser,
       logoutUser,
+      activateCloud,
+      syncNow,
+      deactivateCloud,
     ]
   )
 
@@ -337,6 +541,33 @@ function filenameFromDisposition(disposition: string): string {
   const plainMatch = disposition.match(/filename="?([^";\n]+)"?/i)
   if (plainMatch) return plainMatch[1].trim()
   return ''
+}
+
+interface CloudItem {
+  mediaId: string
+  title: string
+  type: 'audio' | 'video'
+  duration: number | null
+  publicId: string
+  cloudinaryUrl: string
+  sizeBytes: number | null
+  updatedAt: number
+}
+
+async function fetchCloudBlob(url: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('no ok')
+    return await res.blob()
+  } catch {
+    try {
+      const proxied = await fetch(`/api/download?url=${encodeURIComponent(url)}`)
+      if (!proxied.ok) return null
+      return await proxied.blob()
+    } catch {
+      return null
+    }
+  }
 }
 
 export function useApp(): AppState {
