@@ -54,10 +54,14 @@ interface CarPlayerDB extends DBSchema {
     key: string
     value: unknown
   }
+  graphics: {
+    key: string
+    value: Blob | Blob[]
+  }
 }
 
 const DB_NAME = 'media-car-player'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 const CURRENT_USER_KEY = 'current_user'
 const TOMBSTONE_PREFIX = 'tomb_'
@@ -80,6 +84,9 @@ function getDB(): Promise<IDBPDatabase<CarPlayerDB>> {
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta')
+        }
+        if (!db.objectStoreNames.contains('graphics')) {
+          db.createObjectStore('graphics')
         }
         const mediaStore = transaction.objectStore('media')
         if (!mediaStore.indexNames.contains('by-user')) {
@@ -239,6 +246,21 @@ export async function getCloudToken(userId: string): Promise<string | null> {
 
 export async function setCloudToken(userId: string, token: string | null): Promise<void> {
   await setMetaValue(`${CLOUD_TOKEN_PREFIX}${userId}`, token)
+}
+
+// ---- Carrusel de fotos (galería local) ----
+
+const CAR_PHOTOS_KEY = 'car_photos'
+
+export async function getCarPhotos(): Promise<Blob[] | null> {
+  const db = await getDB()
+  const value = await db.get('graphics', CAR_PHOTOS_KEY)
+  return Array.isArray(value) && value.length ? value : null
+}
+
+export async function setCarPhotos(blobs: Blob[]): Promise<void> {
+  const db = await getDB()
+  await db.put('graphics', blobs, CAR_PHOTOS_KEY)
 }
 
 export async function clearUserMedia(userId: string): Promise<void> {
