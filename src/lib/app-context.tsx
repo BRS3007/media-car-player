@@ -33,6 +33,7 @@ import {
   type User,
 } from './mediaStore'
 import { titleFromUrl } from './format'
+import { uploadToCloudinary } from './cloudinaryUpload'
 
 export type View = 'music' | 'videos' | 'import'
 
@@ -368,30 +369,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const local = await getAllMedia(userId)
       let uploaded = 0
+      const uploadErrors: string[] = []
       for (const item of local) {
         if (item.cloud && item.cloud.syncedAt >= item.updatedAt) continue
-        const blob = await getBlob(item.id)
-        const form = new FormData()
-        form.append('file', blob, item.title || 'archivo')
-        form.append('api_key', String(signed.apiKey))
-        form.append('timestamp', String(signed.timestamp))
-        form.append('signature', signed.signature)
-        form.append('folder', signed.folder)
-        const up = await fetch(`https://api.cloudinary.com/v1_1/${signed.cloudName}/auto/upload`, {
-          method: 'POST',
-          body: form,
-        })
-        if (!up.ok) continue
-        const data = await up.json()
-        if (!data.public_id || !data.secure_url) continue
-        const meta: CloudMeta = {
-          publicId: data.public_id,
-          url: data.secure_url,
-          sizeBytes: data.bytes ?? item.size,
-          syncedAt: Date.now(),
+        try {
+          const blob = await getBlob(item.id)
+          const data = await uploadToCloudinary(signed, blob, item.title || 'archivo')
+          if (!data.public_id || !data.secure_url) continue
+          const meta: CloudMeta = {
+            publicId: data.public_id,
+            url: data.secure_url,
+            sizeBytes: data.bytes ?? item.size,
+            syncedAt: Date.now(),
+          }
+          await setMediaCloudMeta(item.id, meta)
+          uploaded++
+        } catch (e) {
+          uploadErrors.push(`${item.title || 'Archivo'}: ${e instanceof Error ? e.message : 'error'}`)
         }
-        await setMediaCloudMeta(item.id, meta)
-        uploaded++
+      }
+      if (uploadErrors.length) {
+        throw new Error('No se subieron ' + uploadErrors.length + ' archivo(s): ' + uploadErrors[0])
       }
 
       const fresh = await getAllMedia(userId)
