@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useApp } from '@/lib/app-context'
 
 export default function SyncPanel() {
-  const { cloudActive, syncing, cloudError, lastSync, activateCloud, syncNow, deactivateCloud } =
+  const { cloudActive, syncing, cloudError, lastSync, syncStatus, activateCloud, syncNow, deactivateCloud } =
     useApp()
   const [open, setOpen] = useState(false)
   const [pin, setPin] = useState('')
@@ -89,6 +89,31 @@ export default function SyncPanel() {
 
             {errorText && (
               <p className="mt-3 rounded-xl bg-rose-950/70 px-4 py-3 text-sm font-medium text-rose-300">{errorText}</p>
+            )}
+
+            {(syncing || syncStatus?.phase === 'done') && syncStatus && (
+              <div className="mt-4 rounded-2xl bg-slate-950/60 p-4">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-slate-200">{syncStatus.label}</span>
+                  <span className="shrink-0 text-slate-400">
+                    {syncStatus.total > 0
+                      ? `${Math.min(syncStatus.current, syncStatus.total)}/${syncStatus.total}`
+                      : ''}
+                  </span>
+                </div>
+                <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-sky-500 transition-all duration-300"
+                    style={{
+                      width: `${
+                        syncStatus.total > 0
+                          ? Math.round((Math.min(syncStatus.current, syncStatus.total) / syncStatus.total) * 100)
+                          : 100
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
             )}
 
             {!cloudActive ? (

@@ -37,6 +37,13 @@ import { uploadToCloudinary } from './cloudinaryUpload'
 
 export type View = 'music' | 'videos' | 'import'
 
+export interface SyncStatus {
+  phase: 'upload' | 'push' | 'pull' | 'done'
+  current: number
+  total: number
+  label: string
+}
+
 interface AppState {
   items: MediaItem[]
   loading: boolean
@@ -69,6 +76,7 @@ interface AppState {
   syncing: boolean
   cloudError: string | null
   lastSync: number | null
+  syncStatus: SyncStatus | null
   activateCloud: (pin: string) => Promise<string | null>
   syncNow: (userIdArg?: string) => Promise<string | null>
   deactivateCloud: () => Promise<void>
@@ -90,6 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<number | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
 
   const currentUser = useMemo(
     () => users.find((u) => u.id === currentUserId) ?? null,
@@ -368,10 +377,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!signed.signature) return signed.error || 'No se pudo preparar la subida'
 
       const local = await getAllMedia(userId)
+      const toUpload = local.filter((it) => !it.cloud || it.cloud.syncedAt < it.updatedAt)
       let uploaded = 0
       const uploadErrors: string[] = []
-      for (const item of local) {
-        if (item.cloud && item.cloud.syncedAt >= item.updatedAt) continue
+      setSyncStatus({ phase: 'upload', current: 0, total: toUpload.length, label: 'Preparando subida…' })
+      for (const item of toUpload) {
         try {
           const blob = await getBlob(item.id)
           const data = await uploadToCloudinary(signed, blob, item.title || 'archivo')
@@ -384,6 +394,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
           await setMediaCloudMeta(item.id, meta)
           uploaded++
+          setSyncStatus({
+            phase: 'upload',
+            current: uploaded,
+            total: toUpload.length,
+            label: `Subiendo ${(item.title || 'archivo').slice(0, 40)}`,
+          })
         } catch (e) {
           uploadErrors.push(`${item.title || 'Archivo'}: ${e instanceof Error ? e.message : 'error'}`)
         }
@@ -392,6 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error('No se subieron ' + uploadErrors.length + ' archivo(s): ' + uploadErrors[0])
       }
 
+      setSyncStatus({ phase: 'push', current: 1, total: 1, label: 'Guardando metadatos en la nube…' })
       const fresh = await getAllMedia(userId)
       const withCloud = fresh.filter((it) => it.cloud)
       if (withCloud.length) {
@@ -430,6 +447,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!pullRes.ok) return 'Error al traer la biblioteca de la nube'
       const data = await pullRes.json()
       const items: CloudItem[] = Array.isArray(data.items) ? data.items : []
+      const toPull = items.filter((c) => {
+        const existing = fresh.find((it) => it.id === c.mediaId)
+        return !(existing && existing.updatedAt >= c.updatedAt)
+      })
+      setSyncStatus({ phase: 'pull', current: 0, total: toPull.length, label: 'Trayendo novedades de la nube…' })
       let pulled = 0
       for (const c of items) {
         const exists = fresh.find((it) => it.id === c.mediaId)
@@ -451,12 +473,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         )
         pulled++
+        if (toPull.length) {
+          setSyncStatus({
+            phase: 'pull',
+            current: pulled,
+            total: toPull.length,
+            label: `Descargando ${(c.title || c.mediaId).slice(0, 40)}`,
+          })
+        }
       }
 
       await refreshItems()
       setLastSync(Date.now())
+      setSyncStatus({ phase: 'done', current: 1, total: 1, label: '¡Sincronizado!' })
       return null
     } catch (e) {
+      setSyncStatus(null)
       return e instanceof Error ? e.message : 'Error de sincronización'
     } finally {
       setSyncing(false)
@@ -528,6 +560,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncing,
       cloudError,
       lastSync,
+      syncStatus,
       activateCloud,
       syncNow,
       deactivateCloud,
@@ -547,6 +580,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncing,
       cloudError,
       lastSync,
+      syncStatus,
       setView,
       playAt,
       closePlayer,
