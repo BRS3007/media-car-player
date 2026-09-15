@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useApp } from '@/lib/app-context'
-import { CarLogo, TrashIcon } from './icons'
+import { TrashIcon } from './icons'
 
 export default function UserScreen() {
   const { users, loading, selectUser, addUser, removeUser, connectCloud } = useApp()
@@ -115,9 +115,11 @@ export default function UserScreen() {
   return (
     <div className="mx-auto flex h-full min-h-dvh max-w-3xl flex-col overflow-y-auto px-6 py-10 no-scrollbar">
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-sky-600 text-white">
-          <CarLogo className="h-14 w-14" />
-        </div>
+        <div
+          className="mx-auto mb-4 h-20 w-20 rounded-3xl bg-cover bg-center shadow-lg"
+          style={{ backgroundImage: "url('/icons/icon-192.png')" }}
+          aria-hidden
+        />
         <h1 className="text-3xl font-bold">Media Car</h1>
         <p className="mt-2 text-slate-400">¿Quién va a usar el carro hoy?</p>
       </div>

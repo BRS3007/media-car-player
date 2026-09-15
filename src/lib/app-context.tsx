@@ -377,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         form.append('timestamp', String(signed.timestamp))
         form.append('signature', signed.signature)
         form.append('folder', signed.folder)
-        const up = await fetch(`https://api.cloudinary.com/v1_1/${signed.cloudName}/video/upload`, {
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${signed.cloudName}/auto/upload`, {
           method: 'POST',
           body: form,
         })
