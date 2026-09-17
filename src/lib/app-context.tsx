@@ -33,7 +33,7 @@ import {
   type User,
 } from './mediaStore'
 import { titleFromUrl } from './format'
-import { uploadToCloudinary } from './cloudinaryUpload'
+import { putToR2 } from './r2Upload'
 
 export type View = 'music' | 'videos' | 'import'
 
@@ -373,9 +373,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSyncing(true)
     setCloudError(null)
     try {
-      const signed = await fetch('/api/cloudinary/sign').then((r) => r.json())
-      if (!signed.signature) return signed.error || 'No se pudo preparar la subida'
-
       const local = await getAllMedia(userId)
       const toUpload = local.filter((it) => !it.cloud || it.cloud.syncedAt < it.updatedAt)
       let uploaded = 0
@@ -384,12 +381,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       for (const item of toUpload) {
         try {
           const blob = await getBlob(item.id)
-          const data = await uploadToCloudinary(signed, blob, item.title || 'archivo')
-          if (!data.public_id || !data.secure_url) continue
+          await putToR2(token, item.id, blob)
           const meta: CloudMeta = {
-            publicId: data.public_id,
-            url: data.secure_url,
-            sizeBytes: data.bytes ?? item.size,
+            publicId: item.id,
+            url: `/api/r2/get?key=${encodeURIComponent(item.id)}`,
+            sizeBytes: blob.size,
             syncedAt: Date.now(),
           }
           await setMediaCloudMeta(item.id, meta)
@@ -456,7 +452,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       for (const c of items) {
         const exists = fresh.find((it) => it.id === c.mediaId)
         if (exists && exists.updatedAt >= c.updatedAt) continue
-        const blob = await fetchCloudBlob(c.cloudinaryUrl)
+        const blob = await fetchCloudBlob(c.cloudinaryUrl, token)
         if (!blob) continue
         await addMedia(
           { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
@@ -624,12 +620,16 @@ interface CloudItem {
   updatedAt: number
 }
 
-async function fetchCloudBlob(url: string): Promise<Blob | null> {
+async function fetchCloudBlob(url: string, token: string): Promise<Blob | null> {
+  const r2 = url.startsWith('/api/r2/get')
   try {
-    const res = await fetch(url)
+    const res = await fetch(url, {
+      headers: r2 ? { 'x-session-token': token } : undefined,
+    })
     if (!res.ok) throw new Error('no ok')
     return await res.blob()
   } catch {
+    if (r2) return null
     try {
       const proxied = await fetch(`/api/download?url=${encodeURIComponent(url)}`)
       if (!proxied.ok) return null

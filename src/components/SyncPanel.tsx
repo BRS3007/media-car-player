@@ -84,7 +84,7 @@ export default function SyncPanel() {
               {cloudActive ? 'Sincronización en la nube' : 'Activar sincronización en la nube'}
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              Tu biblioteca se guarda en la nube (Cloudinary + TiDB) y se sincroniza entre PC y iPad con este mismo usuario.
+              Tu biblioteca se guarda en la nube (R2 + TiDB) y se sincroniza entre PC y iPad con este mismo usuario.
             </p>
 
             {errorText && (
