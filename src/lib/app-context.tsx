@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -99,6 +100,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cloudError, setCloudError] = useState<string | null>(null)
   const [lastSync, setLastSync] = useState<number | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const syncingRef = useRef(false)
+
+  useEffect(() => {
+    syncingRef.current = syncing
+  }, [syncing])
 
   const currentUser = useMemo(
     () => users.find((u) => u.id === currentUserId) ?? null,
@@ -363,6 +369,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await setTokenAndState(currentUserId, null)
   }, [currentUserId, setTokenAndState])
 
+  useEffect(() => {
+    if (!currentUserId || !cloudActive) return
+    let disposed = false
+    let running = false
+
+    const run = async () => {
+      if (disposed || running || syncingRef.current) return
+      running = true
+      try {
+        const token = await getCloudToken(currentUserId)
+        if (!token) return
+        const pulled = await pullRemoteItems(currentUserId, token)
+        if (pulled > 0) setItems(await getAllMedia(currentUserId))
+        setLastSync(Date.now())
+      } catch {
+        // silencioso: sin internet aún, se reintenta en el siguiente tick
+      } finally {
+        running = false
+      }
+    }
+
+    run()
+    const interval = window.setInterval(run, 30000)
+    const onFocus = () => run()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') run()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [currentUserId, cloudActive])
+
   const syncNow = useCallback(async (userIdArg?: string): Promise<string | null> => {
     const userId = userIdArg ?? currentUserId
     if (!userId) return 'Primero elige un usuario'
@@ -439,45 +482,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await clearTombstone(mediaId)
       }
 
-      const pullRes = await fetch('/api/sync/pull', { headers: { 'x-session-token': token } })
-      if (!pullRes.ok) return 'Error al traer la biblioteca de la nube'
-      const data = await pullRes.json()
-      const items: CloudItem[] = Array.isArray(data.items) ? data.items : []
-      const toPull = items.filter((c) => {
-        const existing = fresh.find((it) => it.id === c.mediaId)
-        return !(existing && existing.updatedAt >= c.updatedAt)
-      })
-      setSyncStatus({ phase: 'pull', current: 0, total: toPull.length, label: 'Trayendo novedades de la nube…' })
-      let pulled = 0
-      for (const c of items) {
-        const exists = fresh.find((it) => it.id === c.mediaId)
-        if (exists && exists.updatedAt >= c.updatedAt) continue
-        const blob = await fetchCloudBlob(c.cloudinaryUrl, token)
-        if (!blob) continue
-        await addMedia(
-          { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
-          {
-            id: c.mediaId,
-            type: c.type,
-            updatedAt: c.updatedAt,
-            cloud: {
-              publicId: c.publicId,
-              url: c.cloudinaryUrl,
-              sizeBytes: c.sizeBytes ?? blob.size,
-              syncedAt: c.updatedAt,
-            },
-          }
-        )
-        pulled++
-        if (toPull.length) {
-          setSyncStatus({
-            phase: 'pull',
-            current: pulled,
-            total: toPull.length,
-            label: `Descargando ${(c.title || c.mediaId).slice(0, 40)}`,
-          })
-        }
-      }
+      setSyncStatus({ phase: 'pull', current: 0, total: 0, label: 'Trayendo novedades de la nube…' })
+      await pullRemoteItems(userId, token, (cur, total) =>
+        setSyncStatus({ phase: 'pull', current: cur, total, label: 'Descargando novedades…' })
+      )
 
       await refreshItems()
       setLastSync(Date.now())
@@ -638,6 +646,46 @@ async function fetchCloudBlob(url: string, token: string): Promise<Blob | null> 
       return null
     }
   }
+}
+
+async function pullRemoteItems(
+  userId: string,
+  token: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<number> {
+  const local = await getAllMedia(userId)
+  const res = await fetch('/api/sync/pull', { headers: { 'x-session-token': token } })
+  if (!res.ok) throw new Error('Error al traer la biblioteca de la nube')
+  const data = await res.json()
+  const items: CloudItem[] = Array.isArray(data.items) ? data.items : []
+  const toPull = items.filter((c) => {
+    const existing = local.find((it) => it.id === c.mediaId)
+    return !(existing && existing.updatedAt >= c.updatedAt)
+  })
+  let pulled = 0
+  for (const c of items) {
+    const exists = local.find((it) => it.id === c.mediaId)
+    if (exists && exists.updatedAt >= c.updatedAt) continue
+    const blob = await fetchCloudBlob(c.cloudinaryUrl, token)
+    if (!blob) continue
+    await addMedia(
+      { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
+      {
+        id: c.mediaId,
+        type: c.type,
+        updatedAt: c.updatedAt,
+        cloud: {
+          publicId: c.publicId,
+          url: c.cloudinaryUrl,
+          sizeBytes: c.sizeBytes ?? blob.size,
+          syncedAt: c.updatedAt,
+        },
+      }
+    )
+    pulled++
+    if (toPull.length) onProgress?.(pulled, toPull.length)
+  }
+  return pulled
 }
 
 export function useApp(): AppState {

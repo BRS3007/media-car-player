@@ -29,10 +29,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="es">
+    <html lang="es" translate="no">
       <head>
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        <meta name="google" content="notranslate" />
       </head>
       <body>{children}</body>
     </html>

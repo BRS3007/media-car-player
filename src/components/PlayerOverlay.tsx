@@ -222,11 +222,7 @@ export default function PlayerOverlay() {
         </div>
       )}
 
-      <div
-        className={`absolute inset-x-0 top-0 transition-opacity duration-300 ${
-          controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
-        }`}
-      >
+      <div className="absolute inset-x-0 top-0">
         <div
           className="pt-safe flex items-center gap-3 p-3"
           style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.75), rgba(0,0,0,0))' }}
@@ -237,10 +233,10 @@ export default function PlayerOverlay() {
               e.stopPropagation()
               closePlayer()
             }}
-            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur active:bg-white/20"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur active:bg-white/20"
             aria-label="Cerrar reproductor"
           >
-            <BackIcon className="h-8 w-8" />
+            <BackIcon className="h-6 w-6" />
           </button>
           <span className="min-w-0 flex-1 truncate px-2 text-lg font-semibold text-white drop-shadow">{current.title}</span>
           <button
@@ -249,15 +245,15 @@ export default function PlayerOverlay() {
               e.stopPropagation()
               toggleFullscreen()
             }}
-            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur active:bg-white/20"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur active:bg-white/20"
             aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
           >
             {isFullscreen ? (
-              <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
               </svg>
             ) : (
-              <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
               </svg>
             )}
