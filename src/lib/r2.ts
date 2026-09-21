@@ -19,8 +19,14 @@ export function getR2Config(): R2Config {
   const accessKeyId = process.env.R2_ACCESS_KEY_ID || ''
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || ''
   const bucket = process.env.R2_BUCKET || ''
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error('Configuración de R2 incompleta')
+  const missing = [
+    !accountId && 'R2_ACCOUNT_ID',
+    !accessKeyId && 'R2_ACCESS_KEY_ID',
+    !secretAccessKey && 'R2_SECRET_ACCESS_KEY',
+    !bucket && 'R2_BUCKET',
+  ].filter(Boolean)
+  if (missing.length > 0) {
+    throw new Error(`Faltan variables de entorno R2: ${missing.join(', ')}`)
   }
   return {
     accountId,
