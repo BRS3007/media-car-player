@@ -678,33 +678,36 @@ async function pullRemoteItems(
   if (!res.ok) throw new Error('Error al traer la biblioteca de la nube')
   const data = await res.json()
   const items: CloudItem[] = Array.isArray(data.items) ? data.items : []
-  const toPull = items.filter((c) => {
-    const existing = local.find((it) => it.id === c.mediaId)
-    return !(existing && existing.updatedAt >= c.updatedAt)
-  })
   let pulled = 0
-  for (const c of items) {
-    const exists = local.find((it) => it.id === c.mediaId)
-    if (exists && exists.updatedAt >= c.updatedAt) continue
-    const blob = await fetchCloudBlob(c.cloudinaryUrl, token)
-    if (!blob) continue
-    await addMedia(
-      { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
-      {
-        id: c.mediaId,
-        type: c.type,
-        updatedAt: c.updatedAt,
-        cloud: {
-          publicId: c.publicId,
-          url: c.cloudinaryUrl,
-          sizeBytes: c.sizeBytes ?? blob.size,
-          syncedAt: c.updatedAt,
-        },
-      }
-    )
-    pulled++
-    if (toPull.length) onProgress?.(pulled, toPull.length)
+  const CONCURRENCY = 4
+  let next = 0
+  const work = async () => {
+    while (true) {
+      const c = items[next++]
+      if (!c) return
+      const exists = local.find((it) => it.id === c.mediaId)
+      if (exists && exists.updatedAt >= c.updatedAt) continue
+      const blob = await fetchCloudBlob(c.cloudinaryUrl, token)
+      if (!blob) continue
+      await addMedia(
+        { userId, title: c.title || c.mediaId, blob, mime: blob.type, source: 'sync' },
+        {
+          id: c.mediaId,
+          type: c.type,
+          updatedAt: c.updatedAt,
+          cloud: {
+            publicId: c.publicId,
+            url: c.cloudinaryUrl,
+            sizeBytes: c.sizeBytes ?? blob.size,
+            syncedAt: c.updatedAt,
+          },
+        }
+      )
+      pulled++
+      if (onProgress) onProgress(pulled, items.length)
+    }
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => work()))
   return pulled
 }
 
