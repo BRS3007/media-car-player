@@ -380,7 +380,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const token = await getCloudToken(currentUserId)
         if (!token) return
-        const pulled = await pullRemoteItems(currentUserId, token)
+        const pulled = await pullRemoteItems(
+          currentUserId,
+          token,
+          () => {
+            if (!disposed) getAllMedia(currentUserId).then(setItems).catch(() => {})
+          }
+        )
         if (pulled > 0) setItems(await getAllMedia(currentUserId))
         setLastSync(Date.now())
       } catch {
@@ -630,21 +636,35 @@ interface CloudItem {
 
 async function fetchCloudBlob(url: string, token: string): Promise<Blob | null> {
   const r2 = url.startsWith('/api/r2/get')
-  try {
-    const res = await fetch(url, {
-      headers: r2 ? { 'x-session-token': token } : undefined,
-    })
-    if (!res.ok) throw new Error('no ok')
-    return await res.blob()
-  } catch {
-    if (r2) return null
+  const withTimeout = (ms: number) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), ms)
+    return { signal: controller.signal, done: () => clearTimeout(timer) }
+  }
+  const attempt = async (
+    target: string,
+    headers?: Record<string, string>,
+    ms = 60000
+  ): Promise<Blob | null> => {
+    let c: ReturnType<typeof withTimeout> | null = null
     try {
-      const proxied = await fetch(`/api/download?url=${encodeURIComponent(url)}`)
-      if (!proxied.ok) return null
-      return await proxied.blob()
+      c = withTimeout(ms)
+      const res = await fetch(target, { headers, signal: c.signal })
+      if (!res.ok) return null
+      return await res.blob()
     } catch {
       return null
+    } finally {
+      c?.done()
     }
+  }
+  try {
+    if (r2) return await attempt(url, { 'x-session-token': token })
+    const direct = await attempt(url)
+    if (direct) return direct
+    return await attempt(`/api/download?url=${encodeURIComponent(url)}`, undefined, 60000)
+  } catch {
+    return null
   }
 }
 
